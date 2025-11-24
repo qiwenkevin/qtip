@@ -25,6 +25,47 @@ def decode_1mad(x):
     y = y / 147.800537109375
     return y
 
+def decode_custom(x):
+    # mask
+    mask = 0b00111111001111110011111100111111
+    
+    # LCG
+    u1 = x * 34038481 + 76625530
+    u2 = x * 88827277 + 46632450
+    u3 = x * 53179724 + 16848693
+    u4 = x * 60450533 + 92801199
+
+    v1 = u1 & mask
+    v2 = u2 & mask
+    v3 = u3 & mask
+    v4 = u4 & mask
+
+    x = v1 + v2 + v3 + v4 + 0x02020202
+
+    y = x ^ 0b10000000100000001000000010000000
+
+    y1 = (y & 255)
+    y2 = ((y >> 8) & 255)
+    y3 = ((y >> 16) & 255)
+    y4 = ((y >> 24) & 255)
+
+    y1 = y1.to(torch.int8)
+    y2 = y2.to(torch.int8)
+    y3 = y3.to(torch.int8)
+    y4 = y4.to(torch.int8)
+
+    return torch.stack((y1, y2, y3, y4), dim=-1).flatten()
+
+def decode_1mad_int8(x):
+    x = x.to(torch.int64)
+    x = x & ((1 << 32) - 1)
+    x = x * 34038481 + 76625530
+    x = x & ((1 << 32) - 1)
+    y = (x & 255) + ((x >> 8) & 255) + ((x >> 16) & 255) + ((x >> 24) & 255)
+    y = y - 510
+    y = y / 147.800537109375 * 42.666666666666667
+    y = y.to(torch.int8)
+    return y
 
 def decode_2mad(x):
     x = x.to(torch.int64)
@@ -112,6 +153,14 @@ class bitshift_codebook(nn.Module):
             assert V == 1
             self.register_buffer('lut',
                                  decode_1mad(torch.arange(2**L)).unsqueeze(0))
+        elif decode_mode == 'custom':
+            assert V == 1
+            self.register_buffer('lut',
+                                 decode_custom(torch.arange((2**L)//4)).unsqueeze(0))
+        elif decode_mode == '1mad_int8':
+            assert V == 1
+            self.register_buffer('lut',
+                                 decode_1mad_int8(torch.arange(2**L)).unsqueeze(0))
         elif decode_mode == '2mad':
             assert V == 1
             self.register_buffer('lut',
@@ -460,6 +509,8 @@ class BitshiftLinear(nn.Module):
                         trellis = self.cb.unpack_trellis(
                             trellis, self.td_x * self.td_y)
                     hatW = self.get_hatW(trellis, m, n)
+                    if hatW.dtype == torch.int8:
+                        hatW = hatW.to(torch.float16)
                     x = (x.to(hatW.dtype) @ hatW.T).float()
 
             if rcp == 2:

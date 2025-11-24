@@ -1,6 +1,39 @@
 #include <torch/extension.h>
 
+// LLama 3.2
+void decompress_matvec_16_9_2_1_2048_1_2048(
+					  torch::Tensor &compressed,
+					  torch::Tensor &codebook,
+					  torch::Tensor &x,
+					  torch::Tensor &out
+					  );
+void decompress_matvec_16_9_2_1_512_1_2048(
+					  torch::Tensor &compressed,
+					  torch::Tensor &codebook,
+					  torch::Tensor &x,
+					  torch::Tensor &out
+					  );
+void decompress_matvec_16_9_2_1_8192_1_2048(
+					  torch::Tensor &compressed,
+					  torch::Tensor &codebook,
+					  torch::Tensor &x,
+					  torch::Tensor &out
+					  );
+void decompress_matvec_16_9_2_1_2048_1_512(
+					  torch::Tensor &compressed,
+					  torch::Tensor &codebook,
+					  torch::Tensor &x,
+					  torch::Tensor &out
+					  );
+void decompress_matvec_16_9_2_1_2048_1_8192(
+					  torch::Tensor &compressed,
+					  torch::Tensor &codebook,
+					  torch::Tensor &x,
+					  torch::Tensor &out
+					  );
 
+
+// Previous
 void decompress_matvec_16_9_2_1_256_1_256(
 					  torch::Tensor &compressed,
 					  torch::Tensor &codebook,
@@ -487,6 +520,14 @@ void decompress_matvec_16_9_4_1_1024_1_8192(
 
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  // LLama 3.2
+  m.def("decompress_matvec_16_9_2_1_2048_1_2048", &decompress_matvec_16_9_2_1_2048_1_2048, "decompress_matvec_16_9_2_1_2048_1_2048");
+  m.def("decompress_matvec_16_9_2_1_512_1_2048", &decompress_matvec_16_9_2_1_512_1_2048, "decompress_matvec_16_9_2_1_512_1_2048");
+  m.def("decompress_matvec_16_9_2_1_8192_1_2048", &decompress_matvec_16_9_2_1_8192_1_2048, "decompress_matvec_16_9_2_1_8192_1_2048");
+  m.def("decompress_matvec_16_9_2_1_2048_1_512", &decompress_matvec_16_9_2_1_2048_1_512, "decompress_matvec_16_9_2_1_2048_1_512");
+  m.def("decompress_matvec_16_9_2_1_2048_1_8192", &decompress_matvec_16_9_2_1_2048_1_8192, "decompress_matvec_16_9_2_1_2048_1_8192");
+
+  // Previous
   m.def("decompress_matvec_16_9_2_1_256_1_256", &decompress_matvec_16_9_2_1_256_1_256, "decompress_matvec_16_9_2_1_256_1_256");
 
   m.def("decompress_matvec_16_9_4_1_1024_1_3072", &decompress_matvec_16_9_4_1_1024_1_3072, "decompress_matvec_16_9_4_1_1024_1_3072");

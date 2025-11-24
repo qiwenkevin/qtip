@@ -57,6 +57,53 @@ __host__ static void decompress_matvec(
 }
 
 
+// LLama 3.2
+__host__ extern void decompress_matvec_16_9_2_1_2048_1_2048(
+        torch::Tensor &out,
+        torch::Tensor &compressed,
+        torch::Tensor &x,
+        torch::Tensor &codebook
+) {
+    decompress_matvec<16U, 9U, 2U, 1U, 2048U, 1U, 2048U>(out, compressed, x, codebook);
+}
+
+__host__ extern void decompress_matvec_16_9_2_1_512_1_2048(
+        torch::Tensor &out,
+        torch::Tensor &compressed,
+        torch::Tensor &x,
+        torch::Tensor &codebook
+) {
+    decompress_matvec<16U, 9U, 2U, 1U, 512U, 1U, 2048U>(out, compressed, x, codebook);
+}
+
+__host__ extern void decompress_matvec_16_9_2_1_8192_1_2048(
+        torch::Tensor &out,
+        torch::Tensor &compressed,
+        torch::Tensor &x,
+        torch::Tensor &codebook
+) {
+    decompress_matvec<16U, 9U, 2U, 1U, 8192U, 1U, 2048U>(out, compressed, x, codebook);
+}
+
+__host__ extern void decompress_matvec_16_9_2_1_2048_1_512(
+        torch::Tensor &out,
+        torch::Tensor &compressed,
+        torch::Tensor &x,
+        torch::Tensor &codebook
+) {
+    decompress_matvec<16U, 9U, 2U, 1U, 2048U, 1U, 512U>(out, compressed, x, codebook);
+}
+
+__host__ extern void decompress_matvec_16_9_2_1_2048_1_8192(
+        torch::Tensor &out,
+        torch::Tensor &compressed,
+        torch::Tensor &x,
+        torch::Tensor &codebook
+) {
+    decompress_matvec<16U, 9U, 2U, 1U, 2048U, 1U, 8192U>(out, compressed, x, codebook);
+}
+
+// Previously instantiated
 __host__ extern void decompress_matvec_16_9_4_1_8192_1_3072(
         torch::Tensor &out,
         torch::Tensor &compressed,

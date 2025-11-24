@@ -14,3 +14,7 @@ fast-hadamard-transform/build/
 fast-hadamard-transform/dist/
 report*.nsys-rep
 report*.sqlite
+
+tmp/
+*.egg-info/
+Llama-3.2-1B-Instruct-Hessians/
