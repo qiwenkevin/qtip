@@ -57,39 +57,54 @@ def get_emb(args, kwargs):
 
 def main(args):
     torch.set_grad_enabled(False)
+    glog.info('Loading tokenizer...')
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
     tokenizer.pad_token = tokenizer.eos_token
+    glog.info('Sampling dataset...')
     devset = utils.sample_rp1t(tokenizer, args.devset_size, args.ctx_size,
                                args.sample_proc)
+    glog.info(f'Dataset sampled: {len(devset)} samples')
 
     with init_empty_weights():
         orig_model = AutoModelForCausalLM.from_pretrained(
             args.base_model,
             torch_dtype='auto',
-            device_map='sequential',
             low_cpu_mem_usage=True)
 
-    start_dev = max(orig_model.hf_device_map.values()) + 1
-    end_dev = torch.cuda.device_count()
-    fake_dev_map = {
-        'model.embed_tokens': start_dev,
-        'model.rotary_emb': start_dev,
-        'model.norm': end_dev - 1,
-        'lm_head': end_dev - 1
-    }
-    per_dev = math.ceil(
-        (len(orig_model.model.layers) + 4) / (end_dev - start_dev))
-    for i in range(len(orig_model.model.layers)):
-        fake_dev_map[f'model.layers.{i}'] = (i + 2) // per_dev + start_dev
+    num_gpus = torch.cuda.device_count()
+    glog.info(f'Detected {num_gpus} GPU(s)')
+    
+    if num_gpus == 1:
+        # Single GPU setup - put everything on device 0
+        start_dev = 0
+        end_dev = 1
+        fake_dev_map = 'cuda:0'
+        orig_dtype = orig_model.config.torch_dtype if orig_model.config.torch_dtype else torch.float16
+    else:
+        # Multi-GPU setup - use original device mapping logic
+        start_dev = max(orig_model.hf_device_map.values()) + 1 if hasattr(orig_model, 'hf_device_map') else 0
+        end_dev = num_gpus
+        fake_dev_map = {
+            'model.embed_tokens': start_dev,
+            'model.rotary_emb': start_dev,
+            'model.norm': end_dev - 1,
+            'lm_head': end_dev - 1
+        }
+        per_dev = math.ceil(
+            (len(orig_model.model.layers) + 4) / (end_dev - start_dev))
+        for i in range(len(orig_model.model.layers)):
+            fake_dev_map[f'model.layers.{i}'] = (i + 2) // per_dev + start_dev
+        orig_dtype = orig_model.model.embed_tokens.weight.dtype
 
-    orig_dtype = orig_model.model.embed_tokens.weight.dtype
-    print(orig_dtype)
-    print(fake_dev_map)
+    glog.info(f"Using dtype: {orig_dtype}")
+    glog.info(f"Device map: {fake_dev_map}")
     del orig_model  # remanifest in eval process
     utils.clean()
 
+    glog.info('Loading quantized model...')
     quant_model = model_from_hf_path(args.hf_path,
                                      device_map=fake_dev_map)[0].float()
+    glog.info('Quantized model loaded')
 
     for name, module in quant_model.named_modules():
         if isinstance(module, QuantizedLinear):
@@ -106,9 +121,12 @@ def main(args):
                 module.mode = 'eval'
             module.grad_ckpt = args.ft_grad_ckpt
     utils.clean()
+    glog.info('Starting end-to-end finetuning...')
+    use_cpu = (num_gpus == 1)
+    use_cpu = True  # force cpu inference to save memory
     with torch.enable_grad():
         finetune.finetune_susv_e2e(quant_model, start_dev, devset, orig_dtype,
-                                   args)
+                                   args, use_cpu_infer=use_cpu)
 
     for name, module in quant_model.named_modules():
         if isinstance(module, QuantizedLinear):
