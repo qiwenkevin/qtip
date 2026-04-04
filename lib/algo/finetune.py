@@ -360,14 +360,17 @@ def infer(args, end_dev, n_layers, in_q, out_q):
         for i in range(n_layers):
             fake_dev_map[f'model.layers.{i}'] = (i + 1) // per_dev
 
+        glog.info(f'Loading original model with device_map={fake_dev_map}...')
         model = AutoModelForCausalLM.from_pretrained(args.base_model,
                                                      torch_dtype='auto',
                                                      device_map=fake_dev_map,
                                                      low_cpu_mem_usage=True)
+        glog.info('Original model loaded on GPU')
         while True:
             data = in_q.get()
             if data is None:
                 return
+            glog.info('Running inference on GPU...')
             out_q.put(
                 model(data.to(0))['logits'][:, :-1].contiguous().softmax(
                     dim=-1).cpu())

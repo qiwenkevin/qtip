@@ -5,6 +5,7 @@
 *.out
 *.json
 __pycache__/
+.venv
 #*
 slurm_out/
 ckpts/
