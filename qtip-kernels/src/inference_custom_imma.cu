@@ -18,15 +18,21 @@ using namespace nvcuda;
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x)      do { CHECK_CUDA(x); CHECK_CONTIGUOUS(x); } while (false)
 
-#define BLOCKS_PER_SM 2
-#define MMA_M         16
-#define MMA_N         8
-#define MMA_K         16
-#define BLOCK_COUNT   256
-#define WARP_SIZE     32
-#define BLOCK_SIZE    512
-#define WARPS_PER_BLOCK (BLOCK_SIZE / WARP_SIZE)
-#define FULL_MASK     0xFFFFFFFFU
+#define MMA_M 16
+#define MMA_N 8
+#define MMA_K 16
+#define WARP_SIZE 32
+#define FULL_MASK 0xFFFFFFFFU
+
+constexpr uint32_t pick_block_size(uint32_t M_) {
+    return (M_ / MMA_M / 2 < 32) ? 1024U : 512U;
+}
+constexpr uint32_t pick_block_count(uint32_t M_) {
+    return (M_ / MMA_M / 2 < 32) ? 128U : 256U;
+}
+constexpr uint32_t pick_blocks_per_sm(uint32_t M_) {
+    return (M_ / MMA_M / 2 < 32) ? 1U : 2U;
+}
 
 
 __inline__ __device__ uint32_t ld_cs(const uint32_t* p)
@@ -124,7 +130,7 @@ __device__ inline int8_t decode_custom_one(uint32_t state16) {
 
 template <uint32_t L, uint32_t R, uint32_t M, uint32_t N, uint32_t K>
 __global__ static void
-__launch_bounds__(BLOCK_SIZE, BLOCKS_PER_SM)
+__launch_bounds__(pick_block_size(M), pick_blocks_per_sm(M))
 kernel_decompress_matvec_custom_imma(
     float *__restrict__ out,
     const uint32_t *__restrict__ compressed,
@@ -140,12 +146,14 @@ kernel_decompress_matvec_custom_imma(
     constexpr uint32_t tileCountM = M / MMA_M;
     constexpr uint32_t tileCountK = K / MMA_K;
 
-    constexpr uint32_t warps_per_block = BLOCK_SIZE / WARP_SIZE;
+    constexpr uint32_t BLOCK_SIZE_T = pick_block_size(M);
+    constexpr uint32_t BLOCK_COUNT_T = pick_block_count(M);
+    constexpr uint32_t warps_per_block = BLOCK_SIZE_T / WARP_SIZE;
 
 #define ROUND_UP(a, b) ((a + b - 1) / b)
 
     static_assert (tileCountM % 2 == 0);
-    constexpr uint32_t m_per_block = ROUND_UP(tileCountM, (2 * BLOCK_COUNT));
+    constexpr uint32_t m_per_block = ROUND_UP(tileCountM, (2 * BLOCK_COUNT_T));
     constexpr uint32_t k_per_block = tileCountK / (warps_per_block * 4) * 2;
     static_assert((tileCountK % (warps_per_block * 4)) % 4 == 0);
     uint32_t this_warp_k = (warpId < (tileCountK % (warps_per_block * 4)) / 4) ? k_per_block + 2 : k_per_block;
@@ -172,7 +180,7 @@ kernel_decompress_matvec_custom_imma(
 
         int4 reg_p[2] = {};
 
-        __shared__ uint32_t x_buf[BLOCK_SIZE / WARP_SIZE][4][4];
+        __shared__ uint32_t x_buf[BLOCK_SIZE_T / WARP_SIZE][4][4];
 
         constexpr uint32_t u32_per_kfill = 16;  // 4 K-tiles * 4 uint32/K-tile
         uint32_t x_uidx = warpId * u32_per_kfill + laneId;
@@ -289,7 +297,7 @@ kernel_decompress_matvec_custom_imma(
         }
 
         // ** reduce + write fp32 = int32_acc * x_scale **
-        __shared__ __align__(16 * 8*32) int32_t reduce_gather[BLOCK_SIZE / WARP_SIZE][2][16];
+        __shared__ __align__(16 * 8*32) int32_t reduce_gather[BLOCK_SIZE_T / WARP_SIZE][2][16];
         if (laneId % 4 == 0) {
             for (int pi = 0; pi < 2; pi++) {
                 reduce_gather[warpId][pi][laneId / 4]      = reg_p[pi].x;
@@ -300,14 +308,8 @@ kernel_decompress_matvec_custom_imma(
 
         if (warpId < 1) {
             int pi = laneId / 16;
-            // int32 is sufficient: per-warp slot is bounded by
-            //   |int8|^2 * MMA_K * this_warp_k * 2  (two submi per slot)
-            //   = 127*127*16 * (this_warp_k*2)
-            // Summed across BLOCK_SIZE/WARP_SIZE=16 warps. For the shapes we
-            // ship (K<=8192, this_warp_k<=8), worst case is ~66M << 2^31.
-            // Bench shapes assert this; revisit if K>=131072 is ever added.
             int32_t reduced = 0;
-            for (int warpi = 0; warpi < BLOCK_SIZE / WARP_SIZE; warpi++) {
+            for (int warpi = 0; warpi < BLOCK_SIZE_T / WARP_SIZE; warpi++) {
                 reduced += reduce_gather[warpi][pi][laneId % 16];
             }
 
@@ -332,14 +334,17 @@ __host__ static void decompress_matvec_custom_imma_ptr(
     static_assert(M % MMA_M == 0);
     static_assert(N == 1);
     static_assert(K % MMA_K == 0);
-    static_assert(BLOCK_SIZE % WARP_SIZE == 0);
+    static_assert(pick_block_size(M) % WARP_SIZE == 0);
 
-    cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, 0);
+    static const cudaDeviceProp deviceProp = []{
+        cudaDeviceProp p;
+        cudaGetDeviceProperties(&p, 0);
+        return p;
+    }();
     assert(deviceProp.warpSize == WARP_SIZE);
 
-    constexpr uint32_t gridSize  = BLOCK_COUNT;
-    constexpr uint32_t blockSize = BLOCK_SIZE;
+    constexpr uint32_t gridSize  = pick_block_count(M);
+    constexpr uint32_t blockSize = pick_block_size(M);
     kernel_decompress_matvec_custom_imma<L, R, M, N, K>
         <<<gridSize, blockSize, 0, stream>>>(out, compressed, x_int8, x_scale_ptr);
     gpuErrchk(cudaPeekAtLastError());

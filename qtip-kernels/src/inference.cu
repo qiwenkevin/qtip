@@ -448,8 +448,11 @@ __host__ static void decompress_matvec_ptr(
     static_assert(N == 1);
     static_assert(K % MMA_K == 0);
 
-    cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, 0);
+    static const cudaDeviceProp deviceProp = []{
+        cudaDeviceProp p;
+        cudaGetDeviceProperties(&p, 0);
+        return p;
+    }();
     //assert(deviceProp.multiProcessorCount == SM_COUNT);
     //assert(deviceProp.maxThreadsPerMultiProcessor == MAX_THREADS_PER_SM);
     assert(deviceProp.warpSize == WARP_SIZE);

@@ -391,8 +391,11 @@ __host__ static void decompress_matvec_custom_ptr(
     static_assert(K % MMA_K == 0);
     static_assert(BLOCK_SIZE % WARP_SIZE == 0);
 
-    cudaDeviceProp deviceProp;
-    cudaGetDeviceProperties(&deviceProp, 0);
+    static const cudaDeviceProp deviceProp = []{
+        cudaDeviceProp p;
+        cudaGetDeviceProperties(&p, 0);
+        return p;
+    }();
     assert(deviceProp.warpSize == WARP_SIZE);
 
     constexpr uint32_t gridSize  = BLOCK_COUNT;
