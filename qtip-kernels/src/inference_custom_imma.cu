@@ -18,13 +18,13 @@ using namespace nvcuda;
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x)      do { CHECK_CUDA(x); CHECK_CONTIGUOUS(x); } while (false)
 
-#define BLOCKS_PER_SM 1
+#define BLOCKS_PER_SM 2
 #define MMA_M         16
 #define MMA_N         8
 #define MMA_K         16
-#define BLOCK_COUNT   128
+#define BLOCK_COUNT   256
 #define WARP_SIZE     32
-#define BLOCK_SIZE    1024
+#define BLOCK_SIZE    512
 #define WARPS_PER_BLOCK (BLOCK_SIZE / WARP_SIZE)
 #define FULL_MASK     0xFFFFFFFFU
 
@@ -124,7 +124,7 @@ __device__ inline int8_t decode_custom_one(uint32_t state16) {
 
 template <uint32_t L, uint32_t R, uint32_t M, uint32_t N, uint32_t K>
 __global__ static void
-__launch_bounds__(BLOCK_SIZE, 1)
+__launch_bounds__(BLOCK_SIZE, BLOCKS_PER_SM)
 kernel_decompress_matvec_custom_imma(
     float *__restrict__ out,
     const uint32_t *__restrict__ compressed,
@@ -207,6 +207,10 @@ kernel_decompress_matvec_custom_imma(
                     reg_a = x_buf[warpId][ki % 2 * 2 + subki][laneId];
                 }
 
+                const uint32_t src_lane_lo = (laneId & ~3u) | ((laneId & 1u) << 1);
+                const uint32_t src_lane_hi = src_lane_lo | 1u;
+                const bool     use_high_half = (laneId & 2u) != 0;
+
 #pragma unroll 2
                 for (uint32_t submi = 0; submi < 2; submi++) {
                     uint32_t reg_c, reg_c2;
@@ -253,22 +257,16 @@ kernel_decompress_matvec_custom_imma(
                         | (((uint32_t)(uint8_t)w[6]) << 16)
                         | (((uint32_t)(uint8_t)w[7]) << 24);
 
-                    uint32_t src_lane_lo = (laneId & ~3u) | ((laneId & 1u) << 1);
-                    uint32_t src_lane_hi = src_lane_lo | 1u;
-                    bool     use_high_half = (laneId & 2u) != 0;
-
                     uint32_t recv_low_a  = __shfl_sync(FULL_MASK, my_low_row,  src_lane_lo);
                     uint32_t recv_low_b  = __shfl_sync(FULL_MASK, my_low_row,  src_lane_hi);
                     uint32_t recv_high_a = __shfl_sync(FULL_MASK, my_high_row, src_lane_lo);
                     uint32_t recv_high_b = __shfl_sync(FULL_MASK, my_high_row, src_lane_hi);
 
-                    auto pick = [use_high_half](uint32_t v) -> uint32_t {
-                        return use_high_half ? (v >> 16) : (v & 0xFFFFu);
-                    };
+                    const uint32_t bp_sel = use_high_half ? 0x7632u : 0x5410u;
 
                     ditto2 reg_w;
-                    reg_w.u32[0] = pick(recv_low_a)  | (pick(recv_low_b)  << 16);
-                    reg_w.u32[1] = pick(recv_high_a) | (pick(recv_high_b) << 16);
+                    reg_w.u32[0] = __byte_perm(recv_low_a,  recv_low_b,  bp_sel);
+                    reg_w.u32[1] = __byte_perm(recv_high_a, recv_high_b, bp_sel);
 
                     asm volatile (
                         "mma.sync.aligned.m16n8k16.row.col.s32.s8.s8.s32"
@@ -302,9 +300,15 @@ kernel_decompress_matvec_custom_imma(
 
         if (warpId < 1) {
             int pi = laneId / 16;
-            int64_t reduced = 0;  // 64-bit to avoid overflow across 32 warps
+            // int32 is sufficient: per-warp slot is bounded by
+            //   |int8|^2 * MMA_K * this_warp_k * 2  (two submi per slot)
+            //   = 127*127*16 * (this_warp_k*2)
+            // Summed across BLOCK_SIZE/WARP_SIZE=16 warps. For the shapes we
+            // ship (K<=8192, this_warp_k<=8), worst case is ~66M << 2^31.
+            // Bench shapes assert this; revisit if K>=131072 is ever added.
+            int32_t reduced = 0;
             for (int warpi = 0; warpi < BLOCK_SIZE / WARP_SIZE; warpi++) {
-                reduced += (int64_t)reduce_gather[warpi][pi][laneId % 16];
+                reduced += reduce_gather[warpi][pi][laneId % 16];
             }
 
             float *out_tile = out + (tileIdM * 2) * f32_per_out_tile;
