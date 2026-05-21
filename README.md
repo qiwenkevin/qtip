@@ -25,6 +25,13 @@ The main QTIP-related arguments in `quantize_llama/quantize_finetune_llama.py` a
 
 You will need to install the packages in `requirements.txt` to use this codebase with `pip install -r requirements.txt`. If you have issues installing `fast-hadamard-transform`, try building from [source](https://github.com/Dao-AILab/fast-hadamard-transform). 
 
+```
+pip install wheel ninja packaging setuptools
+pip install git+https://github.com/Dao-AILab/fast-hadamard-transform.git --no-build-isolation
+
+pip install --upgrade --force-reinstall torch==2.4.0 --index-url https://download.pytorch.org/whl/cu124
+```
+
 ## Fast inference
 
 QTIP achieves the same inference throughput as QuIP# despite achieving higher quality quantization.
