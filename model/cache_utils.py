@@ -8,6 +8,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 from packaging import version
 
+from transformers.cache_utils import (
+    Cache as _TransformersCache,
+    StaticCache as _TransformersStaticCache,
+)
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import is_hqq_available, is_quanto_available, is_torchdynamo_compiling, logging
 from transformers.utils.deprecation import deprecate_kwarg
@@ -25,9 +29,11 @@ if is_hqq_available():
 logger = logging.get_logger(__name__)
 
 
-class Cache(torch.nn.Module):
+class Cache(_TransformersCache):
     """
     Base, abstract class for all caches. The actual data structure is specific to each subclass.
+    Inherits from transformers.cache_utils.Cache so that local cache subclasses (e.g. StaticCache)
+    pass the upstream `isinstance(..., transformers.cache_utils.Cache)` check in modeling_llama.
     """
 
     def __init__(self):
@@ -1045,7 +1051,7 @@ class SinkCache(Cache):
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
 
-class StaticCache(Cache):
+class StaticCache(_TransformersStaticCache, Cache):
     """
     Static Cache class to be used with `torch.compile(model)` and `torch.export()`.
 
@@ -1096,7 +1102,7 @@ class StaticCache(Cache):
         max_batch_size: Optional[int] = None,
         layer_device_map: Optional[Dict[int, Union[str, torch.device, int]]] = None,
     ) -> None:
-        super().__init__()
+        torch.nn.Module.__init__(self)
         if max_batch_size is not None:
             logger.warning_once(
                 f"The 'max_batch_size' argument of {self.__class__.__name__} is deprecated and will be removed in "
