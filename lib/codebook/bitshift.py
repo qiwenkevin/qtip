@@ -12,6 +12,9 @@ from lib.codebook import kdict
 from lib.utils.kernel_check import has_kernel
 from lib.utils.kernel_decompress import decode_compressed
 from lib.utils.matmul_had import matmul_hadU_cuda, matmul_hadUt_cuda
+from lib.utils.quant_activations import quantize_act_int8
+
+_USE_IMMA_CUSTOM_KERNEL = os.environ.get('QTIP_CUSTOM_KERNEL', 'fp16') == 'imma'
 
 
 def decode_1mad(x):
@@ -491,10 +494,19 @@ class BitshiftLinear(nn.Module):
 
             if bs == 1 and self.has_kernel:
                 if self.cb.decode_mode == 'custom':
-                    wrapper = getattr(
-                        torch.ops.quip_lib,
-                        f"decompress_matvec_qtip_custom_{m}_1_{x.numel()}_{self.cb.K}")
-                    x = wrapper(trellis, x)
+                    if _USE_IMMA_CUSTOM_KERNEL:
+                        x_int8, x_scale = quantize_act_int8(x.view(-1))
+                        # kernel expects (k, 1) shape for activations
+                        x_int8 = x_int8.view(-1, 1)
+                        wrapper = getattr(
+                            torch.ops.quip_lib,
+                            f"decompress_matvec_qtip_custom_imma_{m}_1_{x.numel()}_{self.cb.K}")
+                        x = wrapper(trellis, x_int8, x_scale)
+                    else:
+                        wrapper = getattr(
+                            torch.ops.quip_lib,
+                            f"decompress_matvec_qtip_custom_{m}_1_{x.numel()}_{self.cb.K}")
+                        x = wrapper(trellis, x)
                 else:
                     wrapper = getattr(
                         torch.ops.quip_lib,
