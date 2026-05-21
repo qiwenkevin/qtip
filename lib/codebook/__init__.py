@@ -98,3 +98,40 @@ def {name}_cuda(
     {kernel_name}(out, compressed.reshape(-1).view(torch.int32), x.to(torch.float16).T, codebook.reshape(-1))
     return out.T
     """)
+
+
+# Custom-decode kernels (V=1, no codebook arg in the op).
+custom_kernels = [
+    (m, 1, k, K_)
+    for K_ in (2, 3, 4)
+    for (m, k) in (
+        (2048, 2048),
+        (512,  2048),
+        (8192, 2048),
+        (2048, 512),
+        (2048, 8192),
+    )
+]
+
+for m, n, k, bitrate in custom_kernels:
+    torch.library.define(
+        f"quip_lib::decompress_matvec_qtip_custom_{m}_{n}_{k}_{bitrate}",
+        "(Tensor compressed, Tensor x) -> Tensor")
+
+    name        = f"decompress_matvec_qtip_custom_{m}_{n}_{k}_{bitrate}"
+    kernel_name = f"qtip_kernels.decompress_matvec_custom_16_{bitrate}_{m}_{n}_{k}"
+    exec(f"""\
+@torch.library.register_fake("quip_lib::{name}")
+def {name}_abstract(
+        compressed: torch.Tensor,
+        x: torch.Tensor) -> torch.Tensor:
+    return torch.zeros(1, {m}, dtype=torch.float32, device=x.device)
+
+@torch.library.impl("quip_lib::{name}", "cuda")
+def {name}_cuda(
+        compressed: torch.Tensor,
+        x: torch.Tensor) -> torch.Tensor:
+    out = torch.zeros(({m}, 1), dtype=torch.float32, device=x.device)
+    {kernel_name}(out, compressed.reshape(-1).view(torch.int32), x.to(torch.float16).T)
+    return out.T
+    """)

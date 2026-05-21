@@ -32,6 +32,22 @@ void decompress_matvec_16_9_2_1_2048_1_8192(
 					  torch::Tensor &out
 					  );
 
+// Custom decode (V=1, no codebook)
+void decompress_matvec_custom_16_2_2048_1_2048(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_2_512_1_2048(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_2_8192_1_2048(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_2_2048_1_512(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_2_2048_1_8192(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_3_2048_1_2048(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_3_512_1_2048(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_3_8192_1_2048(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_3_2048_1_512(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_3_2048_1_8192(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_4_2048_1_2048(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_4_512_1_2048(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_4_8192_1_2048(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_4_2048_1_512(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
+void decompress_matvec_custom_16_4_2048_1_8192(torch::Tensor &out, torch::Tensor &compressed, torch::Tensor &x);
 
 // Previous
 void decompress_matvec_16_9_2_1_256_1_256(
@@ -602,4 +618,21 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("decompress_matvec_16_9_4_1_8192_1_28672", &decompress_matvec_16_9_4_1_8192_1_28672, "decompress_matvec_16_9_4_1_8192_1_28672");
   m.def("decompress_matvec_16_9_4_1_28672_1_8192", &decompress_matvec_16_9_4_1_28672_1_8192, "decompress_matvec_16_9_4_1_28672_1_8192");
   m.def("decompress_matvec_16_9_4_1_1024_1_8192", &decompress_matvec_16_9_4_1_1024_1_8192, "decompress_matvec_16_9_4_1_1024_1_8192");
+  // Custom decode (V=1, no codebook)
+  m.def("decompress_matvec_custom_16_2_2048_1_2048", &decompress_matvec_custom_16_2_2048_1_2048, "decompress_matvec_custom_16_2_2048_1_2048");
+  m.def("decompress_matvec_custom_16_2_512_1_2048",  &decompress_matvec_custom_16_2_512_1_2048,  "decompress_matvec_custom_16_2_512_1_2048");
+  m.def("decompress_matvec_custom_16_2_8192_1_2048", &decompress_matvec_custom_16_2_8192_1_2048, "decompress_matvec_custom_16_2_8192_1_2048");
+  m.def("decompress_matvec_custom_16_2_2048_1_512",  &decompress_matvec_custom_16_2_2048_1_512,  "decompress_matvec_custom_16_2_2048_1_512");
+  m.def("decompress_matvec_custom_16_2_2048_1_8192", &decompress_matvec_custom_16_2_2048_1_8192, "decompress_matvec_custom_16_2_2048_1_8192");
+  m.def("decompress_matvec_custom_16_3_2048_1_2048", &decompress_matvec_custom_16_3_2048_1_2048, "decompress_matvec_custom_16_3_2048_1_2048");
+  m.def("decompress_matvec_custom_16_3_512_1_2048",  &decompress_matvec_custom_16_3_512_1_2048,  "decompress_matvec_custom_16_3_512_1_2048");
+  m.def("decompress_matvec_custom_16_3_8192_1_2048", &decompress_matvec_custom_16_3_8192_1_2048, "decompress_matvec_custom_16_3_8192_1_2048");
+  m.def("decompress_matvec_custom_16_3_2048_1_512",  &decompress_matvec_custom_16_3_2048_1_512,  "decompress_matvec_custom_16_3_2048_1_512");
+  m.def("decompress_matvec_custom_16_3_2048_1_8192", &decompress_matvec_custom_16_3_2048_1_8192, "decompress_matvec_custom_16_3_2048_1_8192");
+  m.def("decompress_matvec_custom_16_4_2048_1_2048", &decompress_matvec_custom_16_4_2048_1_2048, "decompress_matvec_custom_16_4_2048_1_2048");
+  m.def("decompress_matvec_custom_16_4_512_1_2048",  &decompress_matvec_custom_16_4_512_1_2048,  "decompress_matvec_custom_16_4_512_1_2048");
+  m.def("decompress_matvec_custom_16_4_8192_1_2048", &decompress_matvec_custom_16_4_8192_1_2048, "decompress_matvec_custom_16_4_8192_1_2048");
+  m.def("decompress_matvec_custom_16_4_2048_1_512",  &decompress_matvec_custom_16_4_2048_1_512,  "decompress_matvec_custom_16_4_2048_1_512");
+  m.def("decompress_matvec_custom_16_4_2048_1_8192", &decompress_matvec_custom_16_4_2048_1_8192, "decompress_matvec_custom_16_4_2048_1_8192");
+
 }

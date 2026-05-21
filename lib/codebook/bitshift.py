@@ -432,7 +432,7 @@ class BitshiftLinear(nn.Module):
     def get_hatW_kernel(self, trellis, m, n):
         out = decode_compressed(self.cb.L, self.cb.tlut_bits, self.cb.K,
                                 int(math.log2(self.V)), m, n, trellis.view(-1),
-                                self.cb.lut.T)
+                                self.cb.lut.T.to(trellis.device))
         return out
 
     def cache_hatW(self, packed_trellis, had_left, had_right, K_left, K_right,
@@ -490,17 +490,31 @@ class BitshiftLinear(nn.Module):
                 x = matmul_hadUt_cuda(x, had_left, K_left) / self.scale
 
             if bs == 1 and self.has_kernel:
-                wrapper = getattr(
-                    torch.ops.quip_lib,
-                    f"decompress_matvec_qtip_{m}_1_{x.numel()}_{self.cb.K}")
-
-                x = wrapper(trellis, x, self.cb.tlut)
+                if self.cb.decode_mode == 'custom':
+                    wrapper = getattr(
+                        torch.ops.quip_lib,
+                        f"decompress_matvec_qtip_custom_{m}_1_{x.numel()}_{self.cb.K}")
+                    x = wrapper(trellis, x)
+                else:
+                    wrapper = getattr(
+                        torch.ops.quip_lib,
+                        f"decompress_matvec_qtip_{m}_1_{x.numel()}_{self.cb.K}")
+                    x = wrapper(trellis, x, self.cb.tlut)
 
             else:
                 if mode == 'train-recons':
                     self.cb.recons_lut()
 
-                if self.has_kernel:
+                if self.has_kernel and self.cb.decode_mode == 'custom':
+                    hatW = decode_compressed(
+                        self.cb.L, self.cb.tlut_bits, self.cb.K,
+                        int(math.log2(self.V)),
+                        m, n, trellis.view(-1),
+                        self.cb.lut.T.to(trellis.device))
+                    if hatW.dtype == torch.int8:
+                        hatW = hatW.to(torch.float16)
+                    x = (x.to(hatW.dtype) @ hatW.T).float()
+                elif self.has_kernel:
                     x = BitshiftLinearKernelAG.apply(
                         x, trellis, m, n, self.cb.L, self.cb.tlut_bits, self.cb.K,
                         self.V, self.cb.lut).float()
