@@ -7,7 +7,8 @@ setup(
         CUDAExtension(name="qtip_kernels",
                       sources=[
                           "src/wrapper.cpp", "src/inference.cu",
-                          "src/qtip_torch.cu"
+                          "src/qtip_torch.cu", "src/qtip_torch_custom.cu",
+                          "src/qtip_torch_custom_imma.cu"
                       ],
                       extra_compile_args={
                           "cxx":

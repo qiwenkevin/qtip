@@ -25,6 +25,7 @@ parser.add_argument('--num_fewshot', type=int, default=0)
 parser.add_argument('--limit', type=int, default=None)
 parser.add_argument('--apply_chat_template', action='store_true')
 parser.add_argument('--fewshot_as_multiturn', action='store_true')
+parser.add_argument('--system_instruction', default=None, type=str)
 parser.add_argument('--manifest_model', action='store_true')
 parser.add_argument('--max_mem_ratio', type=float, default=0.7)
 
@@ -56,7 +57,8 @@ def main(args):
         limit=args.limit,
         num_fewshot=args.num_fewshot,
         apply_chat_template=args.apply_chat_template,
-        fewshot_as_multiturn=args.fewshot_as_multiturn)
+        fewshot_as_multiturn=args.fewshot_as_multiturn,
+        system_instruction=args.system_instruction)
 
     for key in results['results']:
         print(key)

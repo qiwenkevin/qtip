@@ -194,7 +194,7 @@ def wrap_tokenizer(tokenizer, x, ctx_size, truncate=True):
 
 
 def sample_rp1t(tokenizer, size=128, ctx_size=2048, nproc=1):
-    dataset = load_dataset('togethercomputer/RedPajama-Data-1T-Sample',
+    dataset = load_dataset('ZengXiangyu/RedPajama-Data-1T-Sample',
                            split='train')
     devset = torch.zeros((size, ctx_size), dtype=torch.int64)
     saved = 0
@@ -233,7 +233,7 @@ def sample_rp1t(tokenizer, size=128, ctx_size=2048, nproc=1):
 
 
 def sample_rp1t_concat(tokenizer, size=128, ctx_size=2048, nproc=1):
-    dataset = load_dataset('togethercomputer/RedPajama-Data-1T-Sample',
+    dataset = load_dataset('ZengXiangyu/RedPajama-Data-1T-Sample',
                            split='train')
     devset = torch.zeros((size, ctx_size), dtype=torch.int64)
     concat = []

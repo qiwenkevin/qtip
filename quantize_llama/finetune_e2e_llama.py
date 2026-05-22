@@ -66,10 +66,12 @@ def main(args):
         orig_model = AutoModelForCausalLM.from_pretrained(
             args.base_model,
             torch_dtype='auto',
-            device_map='sequential',
             low_cpu_mem_usage=True)
 
-    start_dev = max(orig_model.hf_device_map.values()) + 1
+    orig_device_map = infer_auto_device_map(
+        orig_model,
+        no_split_module_classes=orig_model._no_split_modules)
+    start_dev = max(orig_device_map.values()) + 1
     end_dev = torch.cuda.device_count()
     fake_dev_map = {
         'model.embed_tokens': start_dev,

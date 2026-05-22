@@ -12,6 +12,9 @@ from lib.codebook import kdict
 from lib.utils.kernel_check import has_kernel
 from lib.utils.kernel_decompress import decode_compressed
 from lib.utils.matmul_had import matmul_hadU_cuda, matmul_hadUt_cuda
+from lib.utils.quant_activations import quantize_act_int8
+
+_USE_IMMA_CUSTOM_KERNEL = os.environ.get('QTIP_CUSTOM_KERNEL', 'fp16') == 'imma'
 
 
 def decode_1mad(x):
@@ -25,6 +28,47 @@ def decode_1mad(x):
     y = y / 147.800537109375
     return y
 
+def decode_custom(x):
+    # mask
+    mask = 0b00111111001111110011111100111111
+    
+    # LCG
+    u1 = x * 34038481 + 76625530
+    u2 = x * 88827277 + 46632450
+    u3 = x * 53179724 + 16848693
+    u4 = x * 60450533 + 92801199
+
+    v1 = u1 & mask
+    v2 = u2 & mask
+    v3 = u3 & mask
+    v4 = u4 & mask
+
+    x = v1 + v2 + v3 + v4 + 0x02020202
+
+    y = x ^ 0b10000000100000001000000010000000
+
+    y1 = (y & 255)
+    y2 = ((y >> 8) & 255)
+    y3 = ((y >> 16) & 255)
+    y4 = ((y >> 24) & 255)
+
+    y1 = y1.to(torch.int8)
+    y2 = y2.to(torch.int8)
+    y3 = y3.to(torch.int8)
+    y4 = y4.to(torch.int8)
+
+    return torch.stack((y1, y2, y3, y4), dim=-1).flatten()
+
+def decode_1mad_int8(x):
+    x = x.to(torch.int64)
+    x = x & ((1 << 32) - 1)
+    x = x * 34038481 + 76625530
+    x = x & ((1 << 32) - 1)
+    y = (x & 255) + ((x >> 8) & 255) + ((x >> 16) & 255) + ((x >> 24) & 255)
+    y = y - 510
+    y = y / 147.800537109375 * 42.666666666666667
+    y = y.to(torch.int8)
+    return y
 
 def decode_2mad(x):
     x = x.to(torch.int64)
@@ -112,6 +156,14 @@ class bitshift_codebook(nn.Module):
             assert V == 1
             self.register_buffer('lut',
                                  decode_1mad(torch.arange(2**L)).unsqueeze(0))
+        elif decode_mode == 'custom':
+            assert V == 1
+            self.register_buffer('lut',
+                                 decode_custom(torch.arange((2**L)//4)).unsqueeze(0))
+        elif decode_mode == '1mad_int8':
+            assert V == 1
+            self.register_buffer('lut',
+                                 decode_1mad_int8(torch.arange(2**L)).unsqueeze(0))
         elif decode_mode == '2mad':
             assert V == 1
             self.register_buffer('lut',
@@ -383,7 +435,7 @@ class BitshiftLinear(nn.Module):
     def get_hatW_kernel(self, trellis, m, n):
         out = decode_compressed(self.cb.L, self.cb.tlut_bits, self.cb.K,
                                 int(math.log2(self.V)), m, n, trellis.view(-1),
-                                self.cb.lut.T)
+                                self.cb.lut.T.to(trellis.device))
         return out
 
     def cache_hatW(self, packed_trellis, had_left, had_right, K_left, K_right,
@@ -441,17 +493,40 @@ class BitshiftLinear(nn.Module):
                 x = matmul_hadUt_cuda(x, had_left, K_left) / self.scale
 
             if bs == 1 and self.has_kernel:
-                wrapper = getattr(
-                    torch.ops.quip_lib,
-                    f"decompress_matvec_qtip_{m}_1_{x.numel()}_{self.cb.K}")
-
-                x = wrapper(trellis, x, self.cb.tlut)
+                if self.cb.decode_mode == 'custom':
+                    if _USE_IMMA_CUSTOM_KERNEL:
+                        x_int8, x_scale = quantize_act_int8(x.view(-1))
+                        # kernel expects (k, 1) shape for activations
+                        x_int8 = x_int8.view(-1, 1)
+                        wrapper = getattr(
+                            torch.ops.quip_lib,
+                            f"decompress_matvec_qtip_custom_imma_{m}_1_{x.numel()}_{self.cb.K}")
+                        x = wrapper(trellis, x_int8, x_scale)
+                    else:
+                        wrapper = getattr(
+                            torch.ops.quip_lib,
+                            f"decompress_matvec_qtip_custom_{m}_1_{x.numel()}_{self.cb.K}")
+                        x = wrapper(trellis, x)
+                else:
+                    wrapper = getattr(
+                        torch.ops.quip_lib,
+                        f"decompress_matvec_qtip_{m}_1_{x.numel()}_{self.cb.K}")
+                    x = wrapper(trellis, x, self.cb.tlut)
 
             else:
                 if mode == 'train-recons':
                     self.cb.recons_lut()
 
-                if self.has_kernel:
+                if self.has_kernel and self.cb.decode_mode == 'custom':
+                    hatW = decode_compressed(
+                        self.cb.L, self.cb.tlut_bits, self.cb.K,
+                        int(math.log2(self.V)),
+                        m, n, trellis.view(-1),
+                        self.cb.lut.T.to(trellis.device))
+                    if hatW.dtype == torch.int8:
+                        hatW = hatW.to(torch.float16)
+                    x = (x.to(hatW.dtype) @ hatW.T).float()
+                elif self.has_kernel:
                     x = BitshiftLinearKernelAG.apply(
                         x, trellis, m, n, self.cb.L, self.cb.tlut_bits, self.cb.K,
                         self.V, self.cb.lut).float()
@@ -460,6 +535,8 @@ class BitshiftLinear(nn.Module):
                         trellis = self.cb.unpack_trellis(
                             trellis, self.td_x * self.td_y)
                     hatW = self.get_hatW(trellis, m, n)
+                    if hatW.dtype == torch.int8:
+                        hatW = hatW.to(torch.float16)
                     x = (x.to(hatW.dtype) @ hatW.T).float()
 
             if rcp == 2:
